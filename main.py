@@ -14,6 +14,17 @@ async def root():
     return( {'message': 'Please use an end point'})
 
 
+@getfired.get('/eval')
+async def eval_category(income: float, assets:float, retirement_expenses: float, expenses: float, savings: float, withdraw: float = 0.04, real_rate: float = 0.06):
+    monthly_rate = 12 * ((1 + (real_rate)) ** (1. / 12) - 1)
+    full_result = float(npf.nper(monthly_rate, -(income - expenses), -assets, retirement_expenses / withdraw))
+
+    new_expenses = expenses - savings 
+    result = full_result - float(npf.nper(monthly_rate, -(income - new_expenses), -assets, retirement_expenses / withdraw))
+
+    return({'months saved' : result})
+
+
 @getfired.get('/month')
 async def eval_budget(income: float, assets:float, retirement_expenses: float, expenses: List[float] = Query([]), categories: List[str] = Query([]), withdraw: float = 0.04, real_rate: float = 0.06):
     monthly_rate = 12 * ((1 + (real_rate)) ** (1. / 12) - 1)
