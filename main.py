@@ -7,7 +7,6 @@ from datetime import date
 from math import ceil
 
 # TODO turn fire date calculator into a function call
-# TODO retirement expenses percentage
 getfired = FastAPI()
 getfired.add_middleware(CORSMiddleware, allow_origins=[
                         "*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"],)
@@ -58,16 +57,29 @@ async def eval_category(income: float, assets: float, retirement_expenses: float
 @getfired.get('/month')
 async def eval_budget(income: float, assets: float, retirement_expenses: float, expenses: List[float] = Query([]), categories: List[str] = Query([]), withdraw: float = 0.04, real_rate: float = 0.06, income_growth: float = 0.05):
     try:
+        income /= 12
         monthly_rate = (1 + (real_rate)) ** (1. / 12) - 1
         fv = assets
         goal = retirement_expenses * sum(expenses) * 12 / withdraw
         original_month = 0
         scaled_income = income
+        net_worths = []
 
         while fv < goal:
             fv = npf.fv(monthly_rate, 1, -(scaled_income - sum(expenses)), -fv)
+            net_worths.append(fv)
             original_month += 1
             scaled_income = scaled_income * (1 + income_growth / 12)
+
+        graph = np.empty((2, ceil(original_month / 12)))
+        curr_year = date.today().year
+
+        graph[0] = [curr_year + i for i in range(ceil(original_month / 12))]
+        count = 0
+        for index in range(len(net_worths)):
+            if((index + 1) % 12 == 0):
+                graph[1][count] = net_worths[index]
+                count += 1
 
         time = {}
         for cat in categories:
@@ -84,7 +96,7 @@ async def eval_budget(income: float, assets: float, retirement_expenses: float, 
 
             time[cat] = original_month - month
 
-        return({'months left': original_month, 'categories': time})
+        return({'months left': original_month, 'categories': time, 'graph': graph.tolist()})
 
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -135,7 +147,7 @@ async def eval_budget(income: float, assets: float, curr_expenses: float, retire
             while fv < 2.5 * goal and counter + init < curr_year:
                 if(sp_500[init + counter] != 0):
                     fv = npf.fv(sp_500[init + counter], 1, -(income *
-                                (1 + income_growth * counter) - curr_expenses), -fv)
+                                                             (1 + income_growth * counter) - curr_expenses), -fv)
                     net_worths[i][0].append(fv)
 
                     if(fv >= goal and not net_worths[i][1]):
