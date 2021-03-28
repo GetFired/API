@@ -80,6 +80,9 @@ async def eval_budget(income: float, assets: float, retirement_expenses: float, 
             if((index + 1) % 12 == 0):
                 graph[1][count] = net_worths[index]
                 count += 1
+        
+        if(count < len(net_worths)):
+            graph[1][-1] = net_worths[-1]
 
         time = {}
         for cat in categories:
@@ -96,7 +99,7 @@ async def eval_budget(income: float, assets: float, retirement_expenses: float, 
 
             time[cat] = original_month - month
 
-        return({'months left': original_month, 'categories': time, 'graph': graph.tolist()})
+        return({'months left': original_month, 'categories': time, 'graph': graph.tolist(), 'goal' : goal})
 
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
