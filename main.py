@@ -1,5 +1,5 @@
 from typing import List
-from fastapi import FastAPI, Query
+from fastapi import FastAPI, Query, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 import numpy_financial as npf
 import numpy as np
@@ -7,7 +7,7 @@ from datetime import date
 from math import ceil
 
 # TODO turn fire date calculator into a function call
-
+# TODO retirement expenses percentage
 getfired = FastAPI()
 getfired.add_middleware(CORSMiddleware, allow_origins=[
                         "*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"],)
@@ -24,51 +24,20 @@ async def root():
 
 @getfired.get('/eval')
 async def eval_category(income: float, assets: float, retirement_expenses: float, expenses: float, savings: float, withdraw: float = 0.04, real_rate: float = 0.06, income_growth: float = 0.05):
-    monthly_rate = (1 + (real_rate)) ** (1. / 12) - 1
-    fv = assets
-    goal = retirement_expenses / withdraw
-    original_month = 0
-    scaled_income = income
+    try:
+        monthly_rate = (1 + (real_rate)) ** (1. / 12) - 1
+        fv = assets
+        goal = retirement_expenses * expenses * 12 / withdraw
+        original_month = 0
+        scaled_income = income
 
-    while fv < goal:
-        fv = npf.fv(monthly_rate, 1, -(scaled_income - expenses), -fv)
+        while fv < goal:
+            fv = npf.fv(monthly_rate, 1, -(scaled_income - expenses), -fv)
 
-        original_month += 1
-        scaled_income = scaled_income * (1 + income_growth / 12)
+            original_month += 1
+            scaled_income = scaled_income * (1 + income_growth / 12)
 
-    new_expenses = expenses - savings
-    month = 0
-    fv = assets
-    scaled_income = income
-
-    while fv < goal:
-        fv = npf.fv(monthly_rate, 1, -(scaled_income - new_expenses), -fv)
-        month += 1
-        scaled_income = scaled_income * (1 + income_growth / 12)
-
-    time_saved = original_month - month
-
-    return({'months saved': time_saved})
-
-
-@getfired.get('/month')
-async def eval_budget(income: float, assets: float, retirement_expenses: float, expenses: List[float] = Query([]), categories: List[str] = Query([]), withdraw: float = 0.04, real_rate: float = 0.06, income_growth: float = 0.05):
-    monthly_rate = (1 + (real_rate)) ** (1. / 12) - 1
-    fv = assets
-    goal = retirement_expenses / withdraw
-    original_month = 0
-    scaled_income = income
-
-    while fv < goal:
-        fv = npf.fv(monthly_rate, 1, -(scaled_income - sum(expenses)), -fv)
-        print(
-            f"npf.fv({monthly_rate}, 1, {-(scaled_income - sum(expenses))}, {-fv})")
-        original_month += 1
-        scaled_income = scaled_income * (1 + income_growth / 12)
-
-    time = {}
-    for cat in categories:
-        new_expenses = sum(expenses) - expenses[categories.index(cat)]
+        new_expenses = expenses - savings
         month = 0
         fv = assets
         scaled_income = income
@@ -78,72 +47,118 @@ async def eval_budget(income: float, assets: float, retirement_expenses: float, 
             month += 1
             scaled_income = scaled_income * (1 + income_growth / 12)
 
-        time[cat] = original_month - month
+        time_saved = original_month - month
 
-    return({'months left': original_month, 'categories': time})
+        return({'months saved': time_saved})
+
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@getfired.get('/month')
+async def eval_budget(income: float, assets: float, retirement_expenses: float, expenses: List[float] = Query([]), categories: List[str] = Query([]), withdraw: float = 0.04, real_rate: float = 0.06, income_growth: float = 0.05):
+    try:
+        monthly_rate = (1 + (real_rate)) ** (1. / 12) - 1
+        fv = assets
+        goal = retirement_expenses * sum(expenses) * 12 / withdraw
+        original_month = 0
+        scaled_income = income
+
+        while fv < goal:
+            fv = npf.fv(monthly_rate, 1, -(scaled_income - sum(expenses)), -fv)
+            original_month += 1
+            scaled_income = scaled_income * (1 + income_growth / 12)
+
+        time = {}
+        for cat in categories:
+            new_expenses = sum(expenses) - expenses[categories.index(cat)]
+            month = 0
+            fv = assets
+            scaled_income = income
+
+            while fv < goal:
+                fv = npf.fv(monthly_rate, 1, -
+                            (scaled_income - new_expenses), -fv)
+                month += 1
+                scaled_income = scaled_income * (1 + income_growth / 12)
+
+            time[cat] = original_month - month
+
+        return({'months left': original_month, 'categories': time})
+
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 @getfired.get('/annual')
 async def eval_budget(income: float, assets: float, curr_expenses: float, retirement_expenses: float, withdraw: float = 0.04, real_rate: float = 0.06, income_growth: float = 0.05):
-    goal = retirement_expenses / withdraw
-    fv = assets
-    year = 0
-    incomes = []
-    net_worths = []
+    try:
+        goal = retirement_expenses * curr_expenses / withdraw
+        fv = assets
+        year = 0
+        incomes = []
+        net_worths = []
 
-    while fv < goal:
-        incomes.append(income)
-        fv = npf.fv(real_rate, 1, -(income - curr_expenses), -fv)
-        net_worths.append(fv)
-        year += 1
-        income = income * (1 + income_growth)
+        while fv < goal:
+            incomes.append(income)
+            fv = npf.fv(real_rate, 1, -(income - curr_expenses), -fv)
+            net_worths.append(fv)
+            year += 1
+            income = income * (1 + income_growth)
 
-    graph = np.empty((2, year))
-    curr_year = date.today().year
+        graph = np.empty((2, year))
+        curr_year = date.today().year
 
-    graph[0] = [curr_year + i for i in range(year)]
-    graph[1] = net_worths
+        graph[0] = [curr_year + i for i in range(year)]
+        graph[1] = net_worths
 
-    return({'months left': year * 12, 'graph': graph.tolist()})
+        return({'months left': year * 12, 'graph': graph.tolist()})
+
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 @getfired.get('/historical')
 async def eval_budget(income: float, assets: float, curr_expenses: float, retirement_expenses: float, withdraw: float = 0.04, income_growth: float = 0.05):
-    goal = retirement_expenses / withdraw
-    start_year = 1950
-    curr_year = date.today().year
-    net_worths = [None] * 75
+    try:
+        goal = retirement_expenses * curr_expenses / withdraw
+        start_year = 1950
+        curr_year = date.today().year
+        net_worths = [None] * 75
 
-    for i in range(len(net_worths)):
-        init = np.random.randint(start_year, curr_year - 10)
-        fv = assets
-        counter = 0
-        net_worths[i] = [[], []]
+        for i in range(len(net_worths)):
+            init = np.random.randint(start_year, curr_year - 10)
+            fv = assets
+            counter = 0
+            net_worths[i] = [[], []]
 
-        while fv < 2.5 * goal and counter + init < curr_year:
-            if(sp_500[init + counter] != 0):
-                fv = npf.fv(sp_500[init + counter], 1, -(income *
-                            (1 + income_growth * counter) - curr_expenses), -fv)
-                net_worths[i][0].append(fv)
+            while fv < 2.5 * goal and counter + init < curr_year:
+                if(sp_500[init + counter] != 0):
+                    fv = npf.fv(sp_500[init + counter], 1, -(income *
+                                (1 + income_growth * counter) - curr_expenses), -fv)
+                    net_worths[i][0].append(fv)
 
-                if(fv >= goal and not net_worths[i][1]):
-                    net_worths[i][1] = counter
+                    if(fv >= goal and not net_worths[i][1]):
+                        net_worths[i][1] = counter
 
-            counter += 1
+                counter += 1
 
-    net_worths = [row for row in net_worths if row[1]]
-    net_worths.sort(key=lambda x: x[1])
+        net_worths = [row for row in net_worths if row[1]]
+        net_worths.sort(key=lambda x: x[1])
 
-    graph = [[], [], [], []]
+        graph = [[], [], [], []]
 
-    graph[3] = net_worths[3 * len(net_worths)//4 - 1]
-    limit = graph[3][1]
+        graph[3] = net_worths[3 * len(net_worths)//4 - 1]
+        limit = graph[3][1]
 
-    graph[0] = [curr_year + i for i in range(limit)]
-    graph[1] = net_worths[len(net_worths)//4 - 1][0][:limit]
-    graph[2] = net_worths[len(net_worths)//2 - 1][0][:limit]
-    graph[3] = graph[3][0][:limit]
+        graph[0] = [curr_year + i for i in range(limit)]
+        graph[1] = net_worths[len(net_worths)//4 - 1][0][:limit]
+        graph[2] = net_worths[len(net_worths)//2 - 1][0][:limit]
+        graph[3] = graph[3][0][:limit]
 
-    lengths = [i[1] for i in net_worths]
+        lengths = [i[1] for i in net_worths]
 
-    return({'average_years': sum(lengths) / len(lengths), 'graph': graph})
+        return({'average_years': sum(lengths) / len(lengths), 'graph': graph})
+
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
