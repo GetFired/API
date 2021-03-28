@@ -5,6 +5,7 @@ import numpy as np
 from datetime import date
 from math import ceil
 
+# TODO turn fire date calculator into a function call
 
 getfired = FastAPI()
 
@@ -17,31 +18,68 @@ async def root():
 
 
 @getfired.get('/eval')
-async def eval_category(income: float, assets:float, retirement_expenses: float, expenses: float, savings: float, withdraw: float = 0.04, real_rate: float = 0.06):
-    monthly_rate = 12 * ((1 + (real_rate)) ** (1. / 12) - 1)
-    full_result = float(npf.nper(monthly_rate, -(income - expenses), -assets, retirement_expenses / withdraw))
+async def eval_category(income: float, assets:float, retirement_expenses: float, expenses: float, savings: float, withdraw: float = 0.04, real_rate: float = 0.06, income_growth: float = 0.05):
+    monthly_rate = (1 + (real_rate)) ** (1. / 12) - 1
+    fv = assets
+    goal = retirement_expenses / withdraw
+    original_month = 0
+    scaled_income = income
 
+    while fv < goal:
+        fv = npf.fv(monthly_rate, 1, -(scaled_income - expenses), -fv)
+
+        original_month += 1
+        scaled_income = scaled_income * (1 + income_growth / 12)
+    
     new_expenses = expenses - savings 
-    result = full_result - float(npf.nper(monthly_rate, -(income - new_expenses), -assets, retirement_expenses / withdraw))
+    month = 0
+    fv = assets
+    scaled_income = income
 
-    return({'months saved' : result})
+    while fv < goal:
+       fv = npf.fv(monthly_rate, 1, -(scaled_income - new_expenses), -fv)
+       month += 1
+       scaled_income = scaled_income * (1 + income_growth / 12)
+    
+    time_saved = original_month - month
+
+    return({'months saved' : time_saved})
 
 
 @getfired.get('/month')
-async def eval_budget(income: float, assets:float, retirement_expenses: float, expenses: List[float] = Query([]), categories: List[str] = Query([]), withdraw: float = 0.04, real_rate: float = 0.06):
-    monthly_rate = 12 * ((1 + (real_rate)) ** (1. / 12) - 1)
-    result = float(npf.nper(monthly_rate, -(income - sum(expenses)), -assets, retirement_expenses / withdraw))
+async def eval_budget(income: float, assets:float, retirement_expenses: float, expenses: List[float] = Query([]), categories: List[str] = Query([]), withdraw: float = 0.04, real_rate: float = 0.06, income_growth: float = 0.05):
+    monthly_rate = (1 + (real_rate)) ** (1. / 12) - 1
+    fv = assets
+    goal = retirement_expenses / withdraw
+    incomes = []
+    original_month = 0
+
+    while fv < goal:
+        incomes.append(income)
+        fv = npf.fv(monthly_rate, 1, -(income - sum(expenses)), -fv)
+        original_month += 1
+        income = income * (1 + income_growth / 12)
 
     time = {}
     for cat in categories:
         new_expenses = sum(expenses) - expenses[categories.index(cat)] 
-        time[cat] = result - float(npf.nper(monthly_rate, -(income - new_expenses), -assets, retirement_expenses / withdraw))
+        month = 0
+        incomes = []
+        fv = assets
+        
+        while fv < goal:
+           incomes.append(income)
+           fv = npf.fv(monthly_rate, 1, -(income - new_expenses), -fv)
+           month += 1
+           income = income * (1 + income_growth / 12)
 
-    return({'months left' : result, 'categories' : time})
+        time[cat] = original_month - month
+
+    return({'months left' : original_month, 'categories' : time})
 
 
 @getfired.get('/annual')
-async def eval_budget(income: float, assets: float, curr_expenses: float, retirement_expenses: float, withdraw: float = 0.04, real_rate: float = 0.06, income_growth = 0.05): 
+async def eval_budget(income: float, assets: float, curr_expenses: float, retirement_expenses: float, withdraw: float = 0.04, real_rate: float = 0.06, income_growth: float = 0.05): 
     goal = retirement_expenses / withdraw
     fv = assets
     year = 0
@@ -50,7 +88,7 @@ async def eval_budget(income: float, assets: float, curr_expenses: float, retire
 
     while fv < goal:
         incomes.append(income)
-        fv = npf.fv(real_rate, 1, -income, -fv)
+        fv = npf.fv(real_rate, 1, -(income - curr_expenses), -fv)
         net_worths.append(fv)
         year += 1
         income = income * (1 + income_growth)
@@ -60,11 +98,8 @@ async def eval_budget(income: float, assets: float, curr_expenses: float, retire
 
     graph[0] = [curr_year + i for i in range(year)]
     graph[1] = net_worths
-    
-    pv_pmt = npf.npv(real_rate, incomes)
-    result = float(npf.nper(real_rate, 0, -(assets + pv_pmt), goal)) * 12
 
-    return({'months left': result, 'graph' : graph.tolist()})
+    return({'months left': year, 'graph' : graph.tolist()})
 
 
 @getfired.get('/historical')

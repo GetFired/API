@@ -1,0 +1,3 @@
+runtime: python37
+entrypoint: gunicorn -k uvicorn.workers.UvicornWorker main:getfired
+instance_class: F1
