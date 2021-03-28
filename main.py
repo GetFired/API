@@ -41,38 +41,68 @@ async def eval_budget(income: float, assets:float, retirement_expenses: float, e
 
 
 @getfired.get('/annual')
-async def eval_budget(income: float, assets: float, curr_expenses: float, retirement_expenses: float, withdraw: float = 0.04, real_rate: float = 0.06):
-    result = npf.nper(real_rate, -(income - curr_expenses), -assets, retirement_expenses / withdraw) * 12
-    result_year = ceil(result / 12) 
+async def eval_budget(income: float, assets: float, curr_expenses: float, retirement_expenses: float, withdraw: float = 0.04, real_rate: float = 0.06, income_growth = 0.05): 
+    goal = retirement_expenses / withdraw
+    fv = assets
+    year = 0
+    incomes = []
+    net_worths = []
 
-    graph = np.empty((2, result_year))
+    while fv < goal:
+        incomes.append(income)
+        fv = npf.fv(real_rate, 1, -income, -fv)
+        net_worths.append(fv)
+        year += 1
+        income = income * (1 + income_growth)
+
+    graph = np.empty((2, year))
     curr_year = date.today().year
 
-    graph[0] = [curr_year + i for i in range(result_year)]
-    graph[1] = npf.fv(real_rate, np.linspace(1, result_year, result_year), -(income - curr_expenses), -assets)
+    graph[0] = [curr_year + i for i in range(year)]
+    graph[1] = net_worths
+    
+    pv_pmt = npf.npv(real_rate, incomes)
+    result = float(npf.nper(real_rate, 0, -(assets + pv_pmt), goal)) * 12
 
     return({'months left': result, 'graph' : graph.tolist()})
 
 
 @getfired.get('/historical')
-async def eval_budget(income: float, assets: float, curr_expenses: float, retirement_expenses: float, withdraw: float = 0.04):
+async def eval_budget(income: float, assets: float, curr_expenses: float, retirement_expenses: float, withdraw: float = 0.04, income_growth: float = 0.05):
     goal = retirement_expenses / withdraw
     start_year = 1950
     curr_year = date.today().year
-    length = []
-
-    for i in range(75):
+    net_worths = [None] * 75
+    
+    for i in range(len(net_worths)):
         init = np.random.randint(start_year, curr_year - 10)
         fv = assets       
         counter = 0
-        interest = []
-        while fv < goal and counter + init < curr_year:
+        net_worths[i] = [[], []]
+
+        while fv < 2.5 * goal and counter + init < curr_year:
             if(sp_500[init + counter] != 0):
-                fv = npf.fv(sp_500[init + counter], 1, -(income - curr_expenses), -fv)
-            interest.append(sp_500[init + counter])
+                fv = npf.fv(sp_500[init + counter], 1, -(income * (1 + income_growth * counter) - curr_expenses), -fv)
+                net_worths[i][0].append(fv)
+
+                if(fv >= goal and not net_worths[i][1]):
+                    net_worths[i][1] = counter
+
             counter += 1
 
-        if(fv >= goal):
-            length.append(counter)
+    net_worths = [row for row in net_worths if row[1]] 
+    net_worths.sort(key=lambda x: x[1])
+    
+    graph = [[], [], [], []]
+    
+    graph[3] = net_worths[3 * len(net_worths)//4 - 1]
+    limit = graph[3][1]
+    
+    graph[0] = [curr_year + i for i in range(limit)]
+    graph[1] = net_worths[len(net_worths)//4 - 1][0][:limit]
+    graph[2] = net_worths[len(net_worths)//2 - 1][0][:limit]
+    graph[3] = graph[3][0][:limit]
+        
+    lengths = [i[1] for i in net_worths]
 
-    return({'average_years' : sum(length) / len(length)})
+    return({'average_years' : sum(lengths) / len(lengths), 'graph' : graph})
