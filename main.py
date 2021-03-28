@@ -51,27 +51,25 @@ async def eval_budget(income: float, assets:float, retirement_expenses: float, e
     monthly_rate = (1 + (real_rate)) ** (1. / 12) - 1
     fv = assets
     goal = retirement_expenses / withdraw
-    incomes = []
     original_month = 0
+    scaled_income = income
 
     while fv < goal:
-        incomes.append(income)
-        fv = npf.fv(monthly_rate, 1, -(income - sum(expenses)), -fv)
+        fv = npf.fv(monthly_rate, 1, -(scaled_income - sum(expenses)), -fv)
         original_month += 1
-        income = income * (1 + income_growth / 12)
+        scaled_income = scaled_income * (1 + income_growth / 12)
 
     time = {}
     for cat in categories:
         new_expenses = sum(expenses) - expenses[categories.index(cat)] 
         month = 0
-        incomes = []
         fv = assets
+        scaled_income = income
         
         while fv < goal:
-           incomes.append(income)
-           fv = npf.fv(monthly_rate, 1, -(income - new_expenses), -fv)
+           fv = npf.fv(monthly_rate, 1, -(scaled_income - new_expenses), -fv)
            month += 1
-           income = income * (1 + income_growth / 12)
+           scaled_income = scaled_income * (1 + income_growth / 12)
 
         time[cat] = original_month - month
 
